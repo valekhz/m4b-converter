@@ -144,7 +144,8 @@ class M4BConverter:
         #os.chdir(os.path.abspath(os.path.dirname(__file__)))
 
         if self.args.output_dir is None:
-            self.output_dir = os.path.join(os.path.dirname(__file__), self.args.ext)
+            self.output_dir = os.path.join(os.path.dirname(__file__),
+                os.path.splitext(os.path.basename(self.args.filename))[0])
         else:
             self.output_dir = self.args.output_dir
         self.ffmpeg_bin = self.args.ffmpeg_bin
