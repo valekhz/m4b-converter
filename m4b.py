@@ -6,10 +6,6 @@ import subprocess
 import sys
 
 
-def exit():
-    raw_input("Press 'Enter' to quit.")
-    sys.exit()
-
 class M4BConverter:
 
     """
@@ -48,7 +44,7 @@ class M4BConverter:
             ret = subprocess.call(encode_cmd)
             if not ret == 0:
                 self.log.error('An error occurred while encoding audio book.')
-                exit()
+                sys.exit()
         else:
             self.log.info("Found a previously encoded file. Delete '%s' if you wish to re-encode." % self.encoded_file)
     
@@ -72,7 +68,7 @@ class M4BConverter:
             ret = subprocess.call(split_cmd)
             if not ret == 0:
                 self.log.error('An error occurred while splitting encoded file.')
-                exit()
+                sys.exit()
 
     
     """
