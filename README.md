@@ -21,7 +21,7 @@ There are two ways to run this script:
 
 ### Command Line Help
 
-$ m4b.py [-h] [-o DIR] [--ffmpeg-bin EXE] [--encode [STR]] [--ext EXT] [--skip-chapters] [--debug] &lt;m4b file&gt;
+    m4b.py [-h] [-o DIR] [--ffmpeg-bin EXE] [--encode [STR]] [--ext EXT] [--skip-chapters] [--debug] <m4b file>
 
     <m4b file>            m4b file to be converted>
 
@@ -44,8 +44,8 @@ visit the [ffmpeg docs](http://www.ffmpeg.org/ffmpeg-doc.html).
 
 Simple conversion using default settings:
 
-$ python m4b.py myfile.m4b
+    python m4b.py myfile.m4b
 
 Using a custom ffmpeg encode string:
 
-$ python m4b.py --encode "-acodec libmp3lame -ar 22050 -ab 128k" myfile.m4b
+    python m4b.py --encode "-acodec libmp3lame -ar 22050 -ab 128k" myfile.m4b
