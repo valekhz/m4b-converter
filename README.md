@@ -1,16 +1,25 @@
 # Convert m4b audio book to mp3
 
-This is a simple python script to convert m4b audio books
-to mp3 files (or any other format ffmpeg supports), split into chapters.
+This is a simple python script to convert m4b audio books to a group of mp3
+files split by chapter.
 
 
 ## Requirements
 
 * Python (tested with 2.7)
-* ffmpeg
+* ffmpeg (make sure it's in your `PATH` or use `--ffmpeg-bin`)
 
 
 ## Usage
+
+There are two ways to run this script:
+
+1. Drag your `.m4b` file onto `m4b.py` and it will automatically convert with
+   the standard settings.
+2. Using the command line which also offers more advanced options.
+
+
+### Command Line Help
 
 $ m4b.py [-h] [-o DIR] [--ffmpeg-bin EXE] [--encode [STR]] [--ext EXT] [--skip-chapters] [--debug] &lt;m4b file&gt;
 
@@ -29,3 +38,14 @@ $ m4b.py [-h] [-o DIR] [--ffmpeg-bin EXE] [--encode [STR]] [--ext EXT] [--skip-c
 Use `--encode` if you wish to do more advanced encoding than the
 default setting (`--encode "-acodec libmp3lame -ar 44100"`). For more options
 visit the [ffmpeg docs](http://www.ffmpeg.org/ffmpeg-doc.html).
+
+
+### Examples
+
+Simple conversion using default settings:
+
+$ python m4b.py myfile.m4b
+
+Using a custom ffmpeg encode string:
+
+$ python m4b.py --encode "-acodec libmp3lame -ar 22050 -ab 128k" myfile.m4b
