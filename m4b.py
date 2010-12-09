@@ -1,16 +1,39 @@
 import argparse
+import ctypes
+import datetime
 import logging
 import os
 import re
 import subprocess
 import sys
 
+import mp4v2
 
-class M4BConverter:
 
+class Chapter:
+    def __init__(self, title=None, start=None, end=None):
+        self.title = title
+        self.start = int(start)
+        self.end = int(end)
+
+    def duration(self):
+        if self.start is None or self.end is None:
+            return None
+        else:
+            return self.end - self.start
+
+    def __str__(self):
+        return '<Chapter Title="%s", Start=%s, End=%s, Duration=%s>' % (
+            self.title,
+            datetime.timedelta(seconds=self.start/1000),
+            datetime.timedelta(seconds=self.end/1000),
+            datetime.timedelta(seconds=self.duration()/1000))
+
+class M4B:
     """
-    Initiate converter.
+    Parse, encode, and split M4B file.
     """
+
     def __init__(self):
         self.__parse_args()
         self.__setup_logging()
@@ -21,7 +44,7 @@ class M4BConverter:
     """
     def encode(self):
         # Create output directory
-        if len(self.chapters) == 0:
+        if not self.chapters:
             self.log.warning('No chapter information was found. Skipping chapter splitting...')
             self.skip_chapters = True
 
@@ -31,22 +54,36 @@ class M4BConverter:
             self.temp_dir = os.path.join(self.output_dir, 'temp')
         if not os.path.isdir(self.temp_dir):
             os.makedirs(self.temp_dir)
-        
+
         self.encoded_file = os.path.join(self.temp_dir, '%s.%s' % (os.path.splitext(os.path.basename(self.filename))[0], self.ext))
 
-        # Skip encoding if the encoded filename already exists.
-        if not os.path.isfile(self.encoded_file):
-            encode_cmd = [self.ffmpeg_bin, '-i', self.filename]
-            for arg in self.encode_str.split(' '):
-                encode_cmd.append(arg)
-            encode_cmd.append(self.encoded_file)
-            self.log.debug('Encoding with command: %s' % ' '.join(encode_cmd))
-            ret = subprocess.call(encode_cmd)
-            if not ret == 0:
-                self.log.error('An error occurred while encoding audio book.')
+        # Skip encoding?
+        if os.path.isfile(self.encoded_file):
+            msg = "Found a previously encoded file '%s'. Do you want to overwrite it? (y/N/q)" % self.encoded_file
+            self.log.info(msg)
+            i = raw_input('')
+            if i.lower() == 'q':
+                self.log.debug('Quitting script.')
                 sys.exit()
-        else:
-            self.log.info("Found a previously encoded file. Delete '%s' if you wish to re-encode." % self.encoded_file)
+            elif i.lower() != 'y':
+                return None
+
+        encode_cmd = [self.ffmpeg_bin, '-y', '-i', self.filename]
+        for arg in self.encode_str.split(' '):
+            encode_cmd.append(arg)
+        encode_cmd.append(self.encoded_file)
+        self.log.info('Encoding audio book...')
+        self.log.debug('Encoding with command: %s' % ' '.join(encode_cmd))
+        try:
+            subprocess.check_output(encode_cmd, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as error:
+            self.log.error('''An error occurred while encoding m4b file.
+  Command: %s
+  Return code: %s
+  Output: --->
+%s
+''' % (' '.join(encode_cmd), error.returncode, error.output))
+            sys.exit()
     
     """
     Split encoded file by chapter.
@@ -54,20 +91,21 @@ class M4BConverter:
     def split(self):
         for chapter in self.chapters:
             n = list.index(self.chapters, chapter) + 1
-            filename = os.path.join(self.output_dir,
-                '%s.%s' % (chapter['title'], self.ext))
-            split_cmd = [self.ffmpeg_bin, '-acodec', 'copy', '-t',
-                         str(chapter['duration']), '-ss', str(chapter['start']),
+            filename = os.path.join(self.output_dir, '%s.%s' % (chapter.title, self.ext))
+            split_cmd = [self.ffmpeg_bin, '-y', '-acodec', 'copy', '-t',
+                         str(chapter.duration()/1000.0), '-ss', str(chapter.start/1000.0),
                          '-i', self.encoded_file, filename]
-            if self.debug:
-                self.log.debug("Splitting chapter %2d/%2d with command: %s" % (n,
-                    len(self.chapters), ' '.join(split_cmd)))
-            else:
-                self.log.info("Splitting chapter %2d/%2d '%s'..." % (n,
-                    len(self.chapters), chapter['title']))
-            ret = subprocess.call(split_cmd)
-            if not ret == 0:
-                self.log.error('An error occurred while splitting encoded file.')
+            self.log.info("Splitting chapter %2d/%2d '%s'..." % (n, len(self.chapters), chapter.title))
+            self.log.debug('Splitting with command: %s\n' % ' '.join(split_cmd))
+            try:
+                subprocess.check_output(split_cmd, stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError as error:
+                self.log.error('''An error occurred while splitting file.
+  Command: %s
+  Return code: %s
+  Output: --->
+%s
+''' % (' '.join(split_cmd), error.returncode, error.output))
                 sys.exit()
 
     
@@ -75,26 +113,24 @@ class M4BConverter:
     Parse chapter data from ffmpeg output.
     """
     def __get_chapters(self):
-        cmd = '%s -i "%s"' % (self.ffmpeg_bin, self.filename)
-        self.log.debug('Retrieving chapter data from output of command: %s' % cmd)
-        proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT)
-        output = proc.communicate()[0]
+        fileHandle = mp4v2.MP4Read(self.filename, 0)
 
-        raw = output.split("    Chapter ")[1:]
-        re_chapter = re.compile('^#[\d\.]+: start ([\d|\.]+), end ([\d|\.]+)[\s]+Metadata:[\s]+title[\s]+: (.*)')
-        
-        chapters = []
-        for raw_chapter in raw:
-            m = re.match(re_chapter, raw_chapter.strip())
-            start = float(m.group(1))
-            e = float(m.group(2))
-            duration = e - start
-            title = unicode(m.group(3), errors='ignore').strip()
-            chapter = dict(title=title, start=start, duration=duration)
-            chapters.append(chapter)
+        chapter_list = ctypes.POINTER(mp4v2.MP4Chapter)()
+        chapter_count = ctypes.c_uint32(0)
+        chapter_type = mp4v2.MP4GetChapters(fileHandle, ctypes.byref(chapter_list),
+            ctypes.byref(chapter_count), mp4v2.MP4ChapterType.Any)
 
-        self.chapters = chapters
+        start = 0
+        self.chapters = []
+        for n in range(0, chapter_count.value):
+            c = Chapter(title=chapter_list[n].title,
+                        start=start,
+                        end=start+int(chapter_list[n].duration))
+            self.chapters.append(c)
+            start += chapter_list[n].duration
+
+        mp4v2.MP4Close(fileHandle)
+
         self.log.debug('Found %d chapter(s).' % len(self.chapters))
 
     """
@@ -134,22 +170,20 @@ class M4BConverter:
             help='m4b file to be converted',
             metavar='<m4b file>')
         
-        self.args = parser.parse_args()
+        args = parser.parse_args()
 
-        # TODO: Fix drop m4b file on py file
-        #os.chdir(os.path.abspath(os.path.dirname(__file__)))
-
-        if self.args.output_dir is None:
+        if args.output_dir is None:
             self.output_dir = os.path.join(os.path.dirname(__file__),
-                os.path.splitext(os.path.basename(self.args.filename))[0])
+                os.path.splitext(os.path.basename(args.filename))[0])
         else:
-            self.output_dir = self.args.output_dir
-        self.ffmpeg_bin = self.args.ffmpeg_bin
-        self.encode_str = self.args.encode_str
-        self.ext = self.args.ext
-        self.skip_chapters = self.args.skip_chapters
-        self.debug = self.args.debug
-        self.filename = self.args.filename
+            self.output_dir = args.output_dir
+        self.ffmpeg_bin = args.ffmpeg_bin
+        self.encode_str = args.encode_str
+        self.ext = args.ext
+        self.skip_chapters = args.skip_chapters
+        self.debug = args.debug
+        self.filename = args.filename
+        self.args = args
     
     def __setup_logging(self):
         logger = logging.getLogger('m4b')
@@ -158,7 +192,7 @@ class M4BConverter:
             level = logging.DEBUG
             ch = logging.StreamHandler()
             fh = logging.FileHandler(os.path.join(os.path.dirname(__file__),
-                                     'm4b_debug.log'), 'w')
+                                     'm4b.log'), 'w')
         else:
             level = logging.INFO
             ch = logging.StreamHandler()
@@ -181,13 +215,16 @@ class M4BConverter:
     source: %s
     output: %s
     ffmpeg: %s
+    encode: %s
+    extension: %s
     skip-chapters: %s''' % (self.filename, self.output_dir,
-            self.ffmpeg_bin, self.skip_chapters))
+            self.ffmpeg_bin, self.encode_str, self.ext, self.skip_chapters))
 
 
 if __name__ == '__main__':
-    m4b = M4BConverter()
-    m4b.encode()
-    if not m4b.skip_chapters:
-        m4b.split()
-        m4b.log.info('Conversion finished successfully!')
+    book = M4B()
+    book.encode()
+    if not book.skip_chapters:
+        book.split()
+        book.log.info('Conversion finished successfully!')
+
