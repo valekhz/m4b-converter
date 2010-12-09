@@ -13,21 +13,21 @@ import mp4v2
 class Chapter:
     def __init__(self, title=None, start=None, end=None):
         self.title = title
-        self.start = int(start)
-        self.end = int(end)
+        self.start = round(int(start)/1000.0, 3)
+        self.end = round(int(end)/1000., 3)
 
     def duration(self):
         if self.start is None or self.end is None:
             return None
         else:
-            return self.end - self.start
+            return round(self.end - self.start, 3)
 
     def __str__(self):
         return '<Chapter Title="%s", Start=%s, End=%s, Duration=%s>' % (
             self.title,
-            datetime.timedelta(seconds=self.start/1000),
-            datetime.timedelta(seconds=self.end/1000),
-            datetime.timedelta(seconds=self.duration()/1000))
+            datetime.timedelta(seconds=self.start),
+            datetime.timedelta(seconds=self.end),
+            datetime.timedelta(seconds=self.duration()))
 
 class M4B:
     """
@@ -37,7 +37,7 @@ class M4B:
     def __init__(self):
         self.__parse_args()
         self.__setup_logging()
-        self.__get_chapters()
+        self.__load_meta()
     
     """
     Encode m4b file with specified codec.
@@ -59,18 +59,21 @@ class M4B:
 
         # Skip encoding?
         if os.path.isfile(self.encoded_file):
-            msg = "Found a previously encoded file '%s'. Do you want to overwrite it? (y/N/q)" % self.encoded_file
+            msg = "Found a previously encoded file '%s'. Do you want to re-encode it? (y/N/q)" % self.encoded_file
             self.log.info(msg)
-            i = raw_input('')
+            i = raw_input('> ')
             if i.lower() == 'q':
                 self.log.debug('Quitting script.')
                 sys.exit()
             elif i.lower() != 'y':
                 return None
 
+        # Build encoding options unless already specified
+        if self.encode_str is None:
+            self.encode_str = '-acodec libmp3lame -ar %s -ab %sk' % (self.time_scale, self.bit_rate)
+
         encode_cmd = [self.ffmpeg_bin, '-y', '-i', self.filename]
-        for arg in self.encode_str.split(' '):
-            encode_cmd.append(arg)
+        encode_cmd += self.encode_str.split(' ')
         encode_cmd.append(self.encoded_file)
         self.log.info('Encoding audio book...')
         self.log.debug('Encoding with command: %s' % ' '.join(encode_cmd))
@@ -93,7 +96,7 @@ class M4B:
             n = list.index(self.chapters, chapter) + 1
             filename = os.path.join(self.output_dir, '%s.%s' % (chapter.title, self.ext))
             split_cmd = [self.ffmpeg_bin, '-y', '-acodec', 'copy', '-t',
-                         str(chapter.duration()/1000.0), '-ss', str(chapter.start/1000.0),
+                         str(chapter.duration()), '-ss', str(chapter.start),
                          '-i', self.encoded_file, filename]
             self.log.info("Splitting chapter %2d/%2d '%s'..." % (n, len(self.chapters), chapter.title))
             self.log.debug('Splitting with command: %s\n' % ' '.join(split_cmd))
@@ -110,11 +113,25 @@ class M4B:
 
     
     """
-    Parse chapter data from ffmpeg output.
+    Load chapters, bitrate, and more..
     """
-    def __get_chapters(self):
+    def __load_meta(self):
+        self.log.info('Loading meta data...')
+        
         fileHandle = mp4v2.MP4Read(self.filename, 0)
 
+        trackid = mp4v2.get_audio_track_id(fileHandle)
+        self.time_scale = mp4v2.MP4GetTrackTimeScale(fileHandle, trackid)
+        self.bit_rate = round(mp4v2.MP4GetTrackBitRate(fileHandle, trackid) / 1000.0, 0)
+
+        if not self.time_scale > 0:
+            self.time_scale = 44100
+        if not self.bit_rate > 0:
+            self.bit_rate = 64
+
+        self.log.debug('Time Scale: %s Hz, Bit Rate: %s kbit/s' % (self.time_scale, self.bit_rate))
+
+        # Chapters
         chapter_list = ctypes.POINTER(mp4v2.MP4Chapter)()
         chapter_count = ctypes.c_uint32(0)
         chapter_type = mp4v2.MP4GetChapters(fileHandle, ctypes.byref(chapter_list),
@@ -150,7 +167,6 @@ class M4B:
             help='path to ffmpeg binary',
             metavar='EXE')
         parser.add_argument('--encode', nargs='?',
-            default='-acodec libmp3lame -ar 44100',
             dest='encode_str',
             help='custom encoding string (see README)',
             metavar='STR')

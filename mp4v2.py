@@ -1,5 +1,19 @@
 import ctypes
+import os.path
 import sys
+
+
+if sys.platform.startswith('linux'):
+    dll = ctypes.CDLL('libmp4v2.so')
+elif sys.platform.startswith('win'):
+    p = os.path.join(os.path.dirname(__file__), 'libmp4v2.dll')
+    if not os.path.isfile(p):
+        p = 'libmp4v2.dll'
+    dll = ctypes.CDLL(p)
+elif sys.platform.startswith('darwin'):
+    dll = ctypes.CDLL('libmp4v2.dylib')
+else:
+    raise NotImplementedError('O/S %r not supported' % sys.platform)
 
 
 class _Enum(ctypes.c_ulong):
@@ -31,48 +45,20 @@ MP4ChapterType.Any = MP4ChapterType(1)
 MP4ChapterType.Qt = MP4ChapterType(2)
 MP4ChapterType.Nero = MP4ChapterType(4)
 
-
 class MP4Chapter(ctypes.Structure):
     _fields_ = [
         ('duration', ctypes.c_uint64),
         ('title', ctypes.c_char * 1024)
     ]
 
-class Chapter:
-    def __init__(self, title=None, duration=None):
-        self.title = title
-        self.duration = duration
-
-class MP4:
-    def __init__(self, filename):
-        self.filename = filename
-        self.__load()
-    
-    def __load(self):
-        fileHandle = libmp4v2.MP4Read(self.filename, 0)
-        self.__load_chapters(fileHandle)
-        libmp4v2.MP4Close(fileHandle)
-    
-    def __load_chapters(self, fileHandle):
-        chapter_list = ctypes.POINTER(libmp4v2.MP4Chapter)()
-        chapter_count = ctypes.c_uint32(0)
-        chapter_type = libmp4v2.MP4GetChapters(fileHandle, ctypes.byref(chapter_list),
-            ctypes.byref(chapter_count), libmp4v2.MP4ChapterType.Any)
-        chapters = []
-        for n in range(0, chapter_count.value):
-            chapter = chapter_list[n]
-            chapters.append(Chapter(title=chapter.title, duration=chapter.duration))
-        self.chapters = chapters
-        self.chapter_type = chapter_type
-
-
-if sys.platform.startswith('linux'):
-    try:
-        dll = ctypes.CDLL('libvlc.so')
-    except OSError:
-        dll = ctypes.CDLL('libvlc.so.5')
-elif sys.platform.startswith('win'):
-    dll = ctypes.CDLL('libmp4v2.dll')
+# Helpers
+def get_audio_track_id(fileHandle):
+    tracks_count = MP4GetNumberOfTracks(fileHandle, None, 0)
+    for n in range(1, tracks_count+1):
+        tt = MP4GetTrackType(fileHandle, n)
+        if tt == 'soun':
+            return n
+    raise Exception('No audio track found.')
 
 
 if hasattr(dll, 'MP4Close'):
@@ -100,3 +86,19 @@ if hasattr(dll, 'MP4GetTrackType'):
     p = ctypes.CFUNCTYPE(ctypes.c_char_p, ctypes.c_void_p, ctypes.c_uint32)
     f = ((1,), (1,))
     MP4GetTrackType = p(('MP4GetTrackType', dll), f)
+
+if hasattr(dll, 'MP4GetNumberOfTracks'):
+    p = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint8)
+    f = ((1,), (1,), (1,))
+    MP4GetNumberOfTracks = p(('MP4GetNumberOfTracks', dll), f)
+
+if hasattr(dll, 'MP4GetTrackTimeScale'):
+    p = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32)
+    f = ((1,), (1,))
+    MP4GetTrackTimeScale = p(('MP4GetTrackTimeScale', dll), f)
+
+if hasattr(dll, 'MP4GetTrackBitRate'):
+    p = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32)
+    f = ((1,), (1,))
+    MP4GetTrackBitRate = p(('MP4GetTrackBitRate', dll), f)
+
