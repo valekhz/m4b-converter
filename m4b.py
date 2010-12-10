@@ -38,7 +38,7 @@ class M4B:
         self.__parse_args()
         self.__setup_logging()
         self.__load_meta()
-    
+
     """
     Encode m4b file with specified codec.
     """
@@ -87,7 +87,7 @@ class M4B:
 %s
 ''' % (' '.join(encode_cmd), error.returncode, error.output))
             sys.exit()
-    
+
     """
     Split encoded file by chapter.
     """
@@ -111,13 +111,13 @@ class M4B:
 ''' % (' '.join(split_cmd), error.returncode, error.output))
                 sys.exit()
 
-    
+
     """
     Load chapters, bitrate, and more..
     """
     def __load_meta(self):
         self.log.info('Loading meta data...')
-        
+
         fileHandle = mp4v2.MP4Read(self.filename, 0)
 
         trackid = mp4v2.get_audio_track_id(fileHandle)
@@ -156,7 +156,7 @@ class M4B:
     def __parse_args(self):
         parser = argparse.ArgumentParser(
             description='Convert m4b audio book to mp3 file(s).')
-        
+
         parser.add_argument('-o', '--output-dir',
             dest='output_dir',
             help='directory to store encoded files',
@@ -185,7 +185,7 @@ class M4B:
         parser.add_argument('filename',
             help='m4b file to be converted',
             metavar='<m4b file>')
-        
+
         args = parser.parse_args()
 
         if args.output_dir is None:
@@ -194,13 +194,17 @@ class M4B:
         else:
             self.output_dir = args.output_dir
         self.ffmpeg_bin = args.ffmpeg_bin
+        if sys.platform.startswith('win'):
+            curr = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
+            if os.path.isfile(curr):
+                self.ffmpeg_bin = curr
         self.encode_str = args.encode_str
         self.ext = args.ext
         self.skip_chapters = args.skip_chapters
         self.debug = args.debug
         self.filename = args.filename
         self.args = args
-    
+
     def __setup_logging(self):
         logger = logging.getLogger('m4b')
 
