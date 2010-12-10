@@ -17,7 +17,7 @@ files split by chapter.
 
 1. Download and install python 2.7.
 2. Download [ffmpeg](http://ffmpeg.arrozcru.org/autobuilds/) and place `ffmpeg.exe` in this directory or your `PATH`.
-3. Grab [libmp4v2.dll](http://www.mediafire.com/file/yxnx4n7o6r5938h/libmp4v2.zip) or [compile](http://code.google.com/p/mp4v2/wiki/BuildSource) your
+3. Grab [libmp4v2.dll](https://github.com/valekhz/libmp4v2-dll/zipball/v0.1) or [compile](http://code.google.com/p/mp4v2/wiki/BuildSource) your
 own dll, then place it in this directory.
 
 ### Ubuntu 10.10
