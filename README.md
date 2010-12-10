@@ -6,23 +6,24 @@ files split by chapter.
 
 ## Requirements
 
-* Python (tested with 2.7)
+* [Python](http://www.python.org/download/) (tested with 2.7)
 * ffmpeg
-* mp4v2
+* [mp4v2](http://code.google.com/p/mp4v2/downloads/detail?name=mp4v2-1.9.1.tar.bz2&can=2&q=) (v1.9.1)
 
 
 ## Installation
 
 ### Windows
 
-1. Download and install [python 2.7](http://www.python.org/download/).
+1. Download and install python 2.7.
 2. Download [ffmpeg](http://ffmpeg.arrozcru.org/autobuilds/) and place `ffmpeg.exe` in this directory or your `PATH`.
-3. Grab [libmp4v2.dll](http:/coming-soon/) or [compile](http://code.google.com/p/mp4v2/wiki/BuildSource#Windows) your
+3. Grab [libmp4v2.dll](http://www.mediafire.com/file/yxnx4n7o6r5938h/libmp4v2.zip) or [compile](http://code.google.com/p/mp4v2/wiki/BuildSource) your
 own dll, then place it in this directory.
 
-### Linux (Ubuntu)
+### Ubuntu 10.10
 
-1. Install packages from the terminal: `sudo apt-get install python ffmpeg libmp4v2-0`
+1. Install packages: `sudo apt-get install python2.7 ffmpeg libavcodec-extra-52`
+2. Download mp4v2 then [compile](http://code.google.com/p/mp4v2/wiki/BuildSource) and install.
 
 ## Usage
 
@@ -48,18 +49,18 @@ There are two ways to use this script:
       --skip-chapters       do not split files by chapter
       --debug               display debug messages and save to log file
 
-To encode with different settings specify `--encode STR` if you wish to do more advanced
-encoding than the default setting (`--encode "-acodec libmp3lame -ar 44100"`). For more options
-visit the [ffmpeg docs](http://www.ffmpeg.org/ffmpeg-doc.html).
+By default the audio will be encoded with lame mp3, keeping the same bit rate and sampling frequency as the source file.
+If you wish to use other settings you can specify your encoding string with `--encode "STR"` where `STR` is a bunch of
+valid ffmpeg encoding parameters. Visit the [ffmpeg docs](http://www.ffmpeg.org/ffmpeg-doc.html) for more info.
 
 
 ### Examples
 
-Simple conversion using default settings:
+Convert with default settings and show debug messages:
 
-    python m4b.py myfile.m4b
+    python m4b.py --debug myfile.m4b
 
-Using a custom ffmpeg encode string:
+Using a custom ffmpeg encoding string:
 
     python m4b.py --encode "-acodec libmp3lame -ar 22050 -ab 128k" myfile.m4b
 

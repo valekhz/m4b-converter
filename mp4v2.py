@@ -4,7 +4,10 @@ import sys
 
 
 if sys.platform.startswith('linux'):
-    dll = ctypes.CDLL('libmp4v2.so')
+    try:
+        dll = ctypes.CDLL('libmp4v2.so')
+    except OSError:
+        dll = ctypes.CDLL('libmp4v2.so.0')
 elif sys.platform.startswith('win'):
     p = os.path.join(os.path.dirname(__file__), 'libmp4v2.dll')
     if not os.path.isfile(p):
