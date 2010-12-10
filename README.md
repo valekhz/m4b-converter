@@ -35,18 +35,19 @@ There are two ways to use this script:
 
 ### Command Line Help
 
-    usage: m4b.py [-h] [-o DIR] [--ffmpeg-bin EXE] [--encode [STR]] [--ext EXT] [--skip-chapters] [--debug] <m4b file>
+    usage: m4b.py [-h] [-o DIR] [--ffmpeg-bin EXE] [--encode "STR"] [--ext EXT] [--skip-splitting] [--skip-encoding] [--debug]
 
     <m4b file>            m4b file to be converted
 
     optional arguments:
       -h, --help            show this help message and exit
-      -o DIR,
-        --output-dir DIR    directory to store encoded files
+      -o DIR, --output-dir DIR
+                            directory to store encoded files
       --ffmpeg-bin EXE      path to ffmpeg binary
-      --encode [STR]        custom encoding string (see below)
+      --encode "STR"        custom encoding string (see README)
       --ext EXT             extension of encoded files
-      --skip-chapters       do not split files by chapter
+      --skip-splitting      do not split files by chapter
+      --skip-encoding       do not encode audio (keep as .mp4)
       --debug               display debug messages and save to log file
 
 By default the audio will be encoded with lame mp3, keeping the same bit rate and sampling frequency as the source file.
@@ -60,7 +61,11 @@ Convert with default settings and show debug messages:
 
     python m4b.py --debug myfile.m4b
 
-Using a custom ffmpeg encoding string:
+If you rather want .mp4 files you can skip encoding to speed up the conversion process:
+
+    python m4b.py --skip-encoding myfile.m4b
+
+Custom ffmpeg encoding string:
 
     python m4b.py --encode "-acodec libmp3lame -ar 22050 -ab 128k" myfile.m4b
 
