@@ -40,22 +40,35 @@ class M4B:
         self.__load_meta()
 
     """
+    Encode and split files.
+    """
+    def convert(self):
+        self.encode()
+        self.split()
+        self.log.info('Conversion finished successfully!')
+
+    """
     Encode m4b file with specified codec.
     """
     def encode(self):
         # Create output directory
         if not self.chapters:
             self.log.warning('No chapter information was found. Skipping chapter splitting...')
-            self.skip_chapters = True
+            self.skip_splitting = True
 
-        if self.skip_chapters:
+        if self.skip_splitting or self.skip_encoding:
             self.temp_dir = self.output_dir
         else:
             self.temp_dir = os.path.join(self.output_dir, 'temp')
         if not os.path.isdir(self.temp_dir):
             os.makedirs(self.temp_dir)
 
-        self.encoded_file = os.path.join(self.temp_dir, '%s.%s' % (os.path.splitext(os.path.basename(self.filename))[0], self.ext))
+        if self.skip_encoding:
+            self.encoded_file = self.filename
+            self.ext = 'mp4'
+            return None
+        else:
+            self.encoded_file = os.path.join(self.temp_dir, '%s.%s' % (os.path.splitext(os.path.basename(self.filename))[0], self.ext))
 
         # Skip encoding?
         if os.path.isfile(self.encoded_file):
@@ -92,6 +105,9 @@ class M4B:
     Split encoded file by chapter.
     """
     def split(self):
+        if self.skip_splitting:
+            return None
+
         for chapter in self.chapters:
             n = list.index(self.chapters, chapter) + 1
             filename = os.path.join(self.output_dir, '%s.%s' % (chapter.title, self.ext))
@@ -174,10 +190,14 @@ class M4B:
             default='mp3',
             dest='ext',
             help='extension of encoded files')
-        parser.add_argument('--skip-chapters',
+        parser.add_argument('--skip-splitting',
             action='store_true',
-            dest='skip_chapters',
+            dest='skip_splitting',
             help='do not split files by chapter')
+        parser.add_argument('--skip-encoding',
+            action='store_true',
+            dest='skip_encoding',
+            help='do not encode audio (keep as .mp4)')
         parser.add_argument('--debug',
             action='store_true',
             dest='debug',
@@ -200,7 +220,8 @@ class M4B:
                 self.ffmpeg_bin = curr
         self.encode_str = args.encode_str
         self.ext = args.ext
-        self.skip_chapters = args.skip_chapters
+        self.skip_splitting = args.skip_splitting
+        self.skip_encoding = args.skip_encoding
         self.debug = args.debug
         self.filename = args.filename
         self.args = args
@@ -237,14 +258,12 @@ class M4B:
     ffmpeg: %s
     encode: %s
     extension: %s
-    skip-chapters: %s''' % (self.filename, self.output_dir,
-            self.ffmpeg_bin, self.encode_str, self.ext, self.skip_chapters))
+    skip-splitting: %s
+    skip-encoding: %s''' % (self.filename, self.output_dir,
+            self.ffmpeg_bin, self.encode_str, self.ext, self.skip_splitting, self.skip_encoding))
 
 
 if __name__ == '__main__':
     book = M4B()
-    book.encode()
-    if not book.skip_chapters:
-        book.split()
-        book.log.info('Conversion finished successfully!')
+    book.convert()
 
