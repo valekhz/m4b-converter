@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 
-import mp4v2
+import libmp4v2
 
 
 class Chapter:
@@ -118,11 +118,11 @@ class M4B:
     def __load_meta(self):
         self.log.info('Loading meta data...')
 
-        fileHandle = mp4v2.MP4Read(self.filename, 0)
+        fileHandle = libmp4v2.MP4Read(self.filename, 0)
 
-        trackid = mp4v2.get_audio_track_id(fileHandle)
-        self.time_scale = mp4v2.MP4GetTrackTimeScale(fileHandle, trackid)
-        self.bit_rate = round(mp4v2.MP4GetTrackBitRate(fileHandle, trackid) / 1000.0, 0)
+        trackid = libmp4v2.get_audio_track_id(fileHandle)
+        self.time_scale = libmp4v2.MP4GetTrackTimeScale(fileHandle, trackid)
+        self.bit_rate = round(libmp4v2.MP4GetTrackBitRate(fileHandle, trackid) / 1000.0, 0)
 
         if not self.time_scale > 0:
             self.time_scale = 44100
@@ -132,10 +132,10 @@ class M4B:
         self.log.debug('Time Scale: %s Hz, Bit Rate: %s kbit/s' % (self.time_scale, self.bit_rate))
 
         # Chapters
-        chapter_list = ctypes.POINTER(mp4v2.MP4Chapter)()
+        chapter_list = ctypes.POINTER(libmp4v2.MP4Chapter)()
         chapter_count = ctypes.c_uint32(0)
-        chapter_type = mp4v2.MP4GetChapters(fileHandle, ctypes.byref(chapter_list),
-            ctypes.byref(chapter_count), mp4v2.MP4ChapterType.Any)
+        chapter_type = libmp4v2.MP4GetChapters(fileHandle, ctypes.byref(chapter_list),
+            ctypes.byref(chapter_count), libmp4v2.MP4ChapterType.Any)
 
         start = 0
         self.chapters = []
@@ -146,9 +146,9 @@ class M4B:
             self.chapters.append(c)
             start += chapter_list[n].duration
 
-        mp4v2.MP4Close(fileHandle)
+        libmp4v2.MP4Close(fileHandle)
 
-        self.log.debug('Found %d chapter(s).' % len(self.chapters))
+        self.log.info('Found %d chapter(s).' % len(self.chapters))
 
     """
     Parse command line arguments.
