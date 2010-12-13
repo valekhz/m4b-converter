@@ -61,7 +61,7 @@ There are two ways to use this script:
 
 When the chapter number isn't included in the chapter title you may want to include it in the generated chapter filenames.
 To do this you can specify `--custom-name 'STR'` where STR is a valid python [format string](http://docs.python.org/library/stdtypes.html#string-formatting-operations). Check the examples below. The
-default is `--custom-name '%(title)s'`.
+default is `--custom-name '%(title)s'`. Available variables: `num`, `title`, `start`, `end`.
 
 #### Encoding
 
