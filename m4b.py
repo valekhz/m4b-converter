@@ -5,6 +5,7 @@ import datetime
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -134,13 +135,20 @@ included or you need to enable mp4v2.")
             except AttributeError:
                 self.log.error('"%s" is an invalid variable. Check the README on how to use --custom-name.' % x)
                 sys.exit()
-            chapter_name = re.sub(re_sub, '', (self.custom_name % values).replace('/', '-'))
-            filename = os.path.join(self.output_dir, '%s.%s' % (chapter_name, self.ext))
+            chapter_name = unicode(re.sub(re_sub, '', (self.custom_name % values).replace('/', '-')), 'utf-8')
+
+            # ffmpeg on windows can't handle unicode filenames so we use a temporary non-unicode filename
+            # then rename to the correct filename later.
+            if sys.platform.startswith('win'):
+                filename = os.path.join(self.output_dir, '_tmp_%d.%s' % (chapter.num, self.ext))
+            else:
+                filename = os.path.join(self.output_dir, '%s.%s' % (chapter_name, self.ext))
+
             split_cmd = [self.ffmpeg_bin, '-y', '-acodec', 'copy', '-t',
                          str(chapter.duration()), '-ss', str(chapter.start),
                          '-i', self.encoded_file, filename]
             self.log.info("Splitting chapter %2d/%2d '%s'..." % (chapter.num, len(self.chapters), chapter_name))
-            self.log.debug('Splitting with command: %s\n' % ' '.join(split_cmd))
+            self.log.debug('Splitting with command: %s' % ' '.join(split_cmd))
             try:
                 subprocess.check_output(split_cmd, stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as error:
@@ -152,6 +160,11 @@ included or you need to enable mp4v2.")
 ''' % (' '.join(split_cmd), error.returncode, error.output))
                 sys.exit()
 
+            # Rename file
+            if sys.platform.startswith('win'):
+                new_filename = os.path.join(self.output_dir, '%s.%s' % (chapter_name, self.ext))
+                self.log.debug('Renaming "%s" to "%s".\n' % (filename, new_filename))
+                shutil.move(filename, new_filename)
 
     """
     Load chapters, bitrate, and more using libmp4v2.
@@ -307,7 +320,7 @@ included or you need to enable mp4v2.")
 
         self.log = logger
 
-        self.log.debug('Conversion script started.')
+        self.log.debug('Script started.')
         if self.debug:
             s = ['Options:']
             for k, v in self.args.__dict__.items():
