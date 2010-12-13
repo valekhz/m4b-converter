@@ -8,8 +8,6 @@ import re
 import subprocess
 import sys
 
-import libmp4v2
-
 
 class Chapter:
     def __init__(self, title=None, start=None, end=None, num=None):
@@ -39,7 +37,25 @@ class M4B:
     def __init__(self):
         self.__parse_args()
         self.__setup_logging()
-        self.__load_meta()
+
+        if self.no_mp4v2:
+            self.__get_ffmpeg_chapters()
+            self.time_scale = 22050
+            self.bitrate = 64
+        else:
+            self.__load_meta()
+            self.log.debug('Chapter type: %s' % self.chapter_type)
+
+        self.log.info('Found %d chapter(s).' % len(self.chapters))
+        if len(self.chapters) == 0 and self.no_mp4v2:
+            self.log.warning("No chapters were found. Either there are no chapters \
+included or you need to enable mp4v2.")
+        if self.debug:
+            c_list = []
+            for chapter in self.chapters:
+                c_list.append('    Chapter %d - %s (start=%s, end=%s)' % (
+                    chapter.num, chapter.title, chapter.start, chapter.end))
+            self.log.debug('Chapters found:\n%s' % '\n'.join(c_list))
 
     """
     Encode and split files.
@@ -55,10 +71,10 @@ class M4B:
     def encode(self):
         # Create output directory
         if not self.chapters:
-            self.log.warning('No chapter information was found. Skipping chapter splitting...')
-            self.skip_splitting = True
+            self.log.error('No chapter information was found.')
+            sys.exit()
 
-        if self.skip_splitting or self.skip_encoding:
+        if self.skip_encoding:
             self.temp_dir = self.output_dir
         else:
             self.temp_dir = os.path.join(self.output_dir, 'temp')
@@ -107,9 +123,6 @@ class M4B:
     Split encoded file by chapter.
     """
     def split(self):
-        if self.skip_splitting:
-            return None
-        
         re_format = re.compile(r'%\(([A-Za-z0-9]+)\)')
         re_sub = re.compile(r'[\\\*\?\"\<\>\|]+')
 
@@ -141,9 +154,11 @@ class M4B:
 
 
     """
-    Load chapters, bitrate, and more..
+    Load chapters, bitrate, and more using libmp4v2.
     """
     def __load_meta(self):
+        import libmp4v2
+
         self.log.info('Loading meta data...')
 
         fileHandle = libmp4v2.MP4Read(self.filename, 0)
@@ -162,7 +177,7 @@ class M4B:
         # Chapters
         chapter_list = ctypes.POINTER(libmp4v2.MP4Chapter)()
         chapter_count = ctypes.c_uint32(0)
-        chapter_type = libmp4v2.MP4GetChapters(fileHandle, ctypes.byref(chapter_list),
+        self.chapter_type = libmp4v2.MP4GetChapters(fileHandle, ctypes.byref(chapter_list),
             ctypes.byref(chapter_count), libmp4v2.MP4ChapterType.Any)
 
         start = 0
@@ -177,13 +192,36 @@ class M4B:
 
         libmp4v2.MP4Close(fileHandle)
 
-        self.log.info('Found %d chapter(s).' % len(self.chapters))
-        self.log.debug('Chapter type: %s' % chapter_type)
-        if self.debug:
-            c_list = []
-            for chapter in self.chapters:
-                c_list.append('    Chapter %d - %s (start=%s, end=%s)' % (chapter.num, chapter.title, chapter.start, chapter.end))
-            self.log.debug('Chapters found:\n%s' % '\n'.join(c_list))
+    '''
+    Retrieve chapters from ffmpeg output instead of using mp4v2. Not recommended.
+    '''
+    def __get_ffmpeg_chapters(self):
+        cmd = [self.ffmpeg_bin, '-i', self.filename]
+        self.log.debug('Retrieving chapter data from output of command: %s' % ' '.join(cmd))
+        output = ''
+        # Command will fail but that's fine.
+        try:
+            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as error:
+            output = error.output
+
+        raw = output.split("    Chapter ")[1:]
+        re_chapter = re.compile('^#[\d\.]+: start ([\d|\.]+), end ([\d|\.]+)[\s]+Metadata:[\s]+title[\s]+: (.*)')
+
+        chapters = []
+        n = 1
+        for raw_chapter in raw:
+            m = re.match(re_chapter, raw_chapter.strip())
+            start = float(m.group(1)) * 1000
+            e = float(m.group(2)) * 1000
+            duration = e - start
+            title = unicode(m.group(3), errors='ignore').strip()
+            chapter = Chapter(num=n, title=title, start=start, end=e)
+            chapters.append(chapter)
+            n += 1
+
+        self.chapters = chapters
+        self.log.debug('Found %d chapter(s).' % len(self.chapters))
 
     """
     Parse command line arguments.
@@ -197,7 +235,7 @@ class M4B:
             metavar='DIR')
         parser.add_argument('--custom-name',
             default='%(title)s',
-            help='Customize chapter filenames (see README)',
+            help='customize chapter filenames (see README)',
             metavar='STR',
             nargs='?')
         parser.add_argument('--ffmpeg-bin',
@@ -211,15 +249,15 @@ class M4B:
         parser.add_argument('--ext',
             default='mp3',
             help='extension of encoded files')
-        parser.add_argument('--skip-splitting',
-            action='store_true',
-            help='do not split files by chapter')
         parser.add_argument('--skip-encoding',
             action='store_true',
             help='do not encode audio (keep as .mp4)')
+        parser.add_argument('--no-mp4v2',
+            action='store_true',
+            help="use ffmpeg to retrieve chapters (not recommended)")
         parser.add_argument('--debug',
             action='store_true',
-            help='display debug messages and save to log file')
+            help='output debug messages and save to m4b.log')
         parser.add_argument('filename',
             help='m4b file to be converted',
             metavar='<m4b file>')
@@ -238,8 +276,8 @@ class M4B:
                 self.ffmpeg_bin = curr
         self._encode = args._encode
         self.ext = args.ext
-        self.skip_splitting = args.skip_splitting
         self.skip_encoding = args.skip_encoding
+        self.no_mp4v2 = args.no_mp4v2
         self.debug = args.debug
         self.filename = args.filename
         self.args = args

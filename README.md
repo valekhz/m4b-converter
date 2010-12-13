@@ -36,8 +36,8 @@ There are two ways to use this script:
 ### Command Line Help
 
     usage: m4b.py [-h] [-o DIR] [--custom-name [STR]] [--ffmpeg-bin EXE]
-                  [--encode [STR]] [--ext EXT] [--skip-splitting]
-                  [--skip-encoding] [--debug]
+                  [--encode [STR]] [--ext EXT] [--skip-encoding] [--no-mp4v2]
+                  [--debug]
                   <m4b file>
     
     Convert m4b audio book to mp3 file(s).
@@ -49,13 +49,13 @@ There are two ways to use this script:
       -h, --help            show this help message and exit
       -o DIR, --output-dir DIR
                             directory to store encoded files
-      --custom-name [STR]   Customize chapter filenames (see README)
+      --custom-name [STR]   customize chapter filenames (see README)
       --ffmpeg-bin EXE      path to ffmpeg binary
       --encode [STR]        custom encoding string (see README)
       --ext EXT             extension of encoded files
-      --skip-splitting      do not split files by chapter
       --skip-encoding       do not encode audio (keep as .mp4)
-      --debug               display debug messages and save to log file
+      --no-mp4v2            use ffmpeg to retrieve chapters (not recommended)
+      --debug               output debug messages and save to m4b.log
 
 #### Chapter filenames
 
@@ -72,11 +72,7 @@ valid ffmpeg encoding parameters. Visit the [ffmpeg docs](http://www.ffmpeg.org/
 
 ### Examples
 
-Convert with default settings and show debug messages:
-
-    python m4b.py --debug myfile.m4b
-
-Include chapter number in the generated chapter filenames: (example: "Chapter 10 - Some Title.mp3")
+Include chapter number in the generated filenames: (example: "Chapter 10 - Some Title.mp3")
 
     python m4b.py --custom-name 'Chapter %(num)d - %(title)s' myfile.m4b
 
@@ -87,4 +83,3 @@ If you rather want .mp4 files you can skip encoding to speed up the conversion p
 Custom ffmpeg encoding string:
 
     python m4b.py --encode '-acodec libmp3lame -ar 22050 -ab 128k' myfile.m4b
-
