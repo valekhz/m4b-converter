@@ -11,10 +11,11 @@ import libmp4v2
 
 
 class Chapter:
-    def __init__(self, title=None, start=None, end=None):
+    def __init__(self, title=None, start=None, end=None, num=None):
         self.title = title
         self.start = round(int(start)/1000.0, 3)
         self.end = round(int(end)/1000., 3)
+        self.num = num
 
     def duration(self):
         if self.start is None or self.end is None:
@@ -82,11 +83,11 @@ class M4B:
                 return None
 
         # Build encoding options unless already specified
-        if self.encode_str is None:
-            self.encode_str = '-acodec libmp3lame -ar %s -ab %sk' % (self.time_scale, self.bit_rate)
+        if self._encode is None:
+            self._encode = '-acodec libmp3lame -ar %s -ab %sk' % (self.time_scale, self.bit_rate)
 
         encode_cmd = [self.ffmpeg_bin, '-y', '-i', self.filename]
-        encode_cmd += self.encode_str.split(' ')
+        encode_cmd += self._encode.split(' ')
         encode_cmd.append(self.encoded_file)
         self.log.info('Encoding audio book...')
         self.log.debug('Encoding with command: %s' % ' '.join(encode_cmd))
@@ -107,14 +108,23 @@ class M4B:
     def split(self):
         if self.skip_splitting:
             return None
+        
+        re_format = re.compile('%\(([A-Za-z0-9]+)\)')
 
         for chapter in self.chapters:
-            n = list.index(self.chapters, chapter) + 1
-            filename = os.path.join(self.output_dir, '%s.%s' % (chapter.title, self.ext))
+            values = {}
+            try:
+                for x in re_format.findall(self.custom_name):
+                    values[x] = getattr(chapter, x)
+            except AttributeError:
+                self.log.error('"%s" is an invalid variable. Check the README on how to use --custom-name.' % x)
+                sys.exit()
+            chapter_name = self.custom_name % values
+            filename = os.path.join(self.output_dir, '%s.%s' % (chapter_name, self.ext))
             split_cmd = [self.ffmpeg_bin, '-y', '-acodec', 'copy', '-t',
                          str(chapter.duration()), '-ss', str(chapter.start),
                          '-i', self.encoded_file, filename]
-            self.log.info("Splitting chapter %2d/%2d '%s'..." % (n, len(self.chapters), chapter.title))
+            self.log.info("Splitting chapter %2d/%2d '%s'..." % (chapter.num, len(self.chapters), chapter_name))
             self.log.debug('Splitting with command: %s\n' % ' '.join(split_cmd))
             try:
                 subprocess.check_output(split_cmd, stderr=subprocess.STDOUT)
@@ -158,7 +168,8 @@ class M4B:
         for n in range(0, chapter_count.value):
             c = Chapter(title=chapter_list[n].title,
                         start=start,
-                        end=start+int(chapter_list[n].duration))
+                        end=start+int(chapter_list[n].duration),
+                        num=n+1)
             self.chapters.append(c)
             start += chapter_list[n].duration
 
@@ -174,33 +185,32 @@ class M4B:
             description='Convert m4b audio book to mp3 file(s).')
 
         parser.add_argument('-o', '--output-dir',
-            dest='output_dir',
             help='directory to store encoded files',
             metavar='DIR')
+        parser.add_argument('--custom-name',
+            default='%(title)s',
+            help='Customize chapter filenames (see README)',
+            metavar='STR',
+            nargs='?')
         parser.add_argument('--ffmpeg-bin',
             default='ffmpeg',
-            dest='ffmpeg_bin',
             help='path to ffmpeg binary',
             metavar='EXE')
         parser.add_argument('--encode', nargs='?',
-            dest='encode_str',
+            dest='_encode',
             help='custom encoding string (see README)',
             metavar='STR')
         parser.add_argument('--ext',
             default='mp3',
-            dest='ext',
             help='extension of encoded files')
         parser.add_argument('--skip-splitting',
             action='store_true',
-            dest='skip_splitting',
             help='do not split files by chapter')
         parser.add_argument('--skip-encoding',
             action='store_true',
-            dest='skip_encoding',
             help='do not encode audio (keep as .mp4)')
         parser.add_argument('--debug',
             action='store_true',
-            dest='debug',
             help='display debug messages and save to log file')
         parser.add_argument('filename',
             help='m4b file to be converted',
@@ -213,12 +223,13 @@ class M4B:
                 os.path.splitext(os.path.basename(args.filename))[0])
         else:
             self.output_dir = args.output_dir
+        self.custom_name = args.custom_name
         self.ffmpeg_bin = args.ffmpeg_bin
         if sys.platform.startswith('win'):
             curr = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
             if os.path.isfile(curr):
                 self.ffmpeg_bin = curr
-        self.encode_str = args.encode_str
+        self._encode = args._encode
         self.ext = args.ext
         self.skip_splitting = args.skip_splitting
         self.skip_encoding = args.skip_encoding
@@ -252,15 +263,7 @@ class M4B:
         self.log = logger
 
         self.log.debug('Conversion script started.')
-        self.log.debug('''Specified arguments:
-    source: %s
-    output: %s
-    ffmpeg: %s
-    encode: %s
-    extension: %s
-    skip-splitting: %s
-    skip-encoding: %s''' % (self.filename, self.output_dir,
-            self.ffmpeg_bin, self.encode_str, self.ext, self.skip_splitting, self.skip_encoding))
+        self.log.debug('Specified arguments:')
 
 
 if __name__ == '__main__':

@@ -35,23 +35,38 @@ There are two ways to use this script:
 
 ### Command Line Help
 
-    usage: m4b.py [-h] [-o DIR] [--ffmpeg-bin EXE] [--encode "STR"] [--ext EXT] [--skip-splitting] [--skip-encoding] [--debug]
-
-    <m4b file>            m4b file to be converted
-
+    usage: m4b.py [-h] [-o DIR] [--custom-name [STR]] [--ffmpeg-bin EXE]
+                  [--encode [STR]] [--ext EXT] [--skip-splitting]
+                  [--skip-encoding] [--debug]
+                  <m4b file>
+    
+    Convert m4b audio book to mp3 file(s).
+    
+    positional arguments:
+      <m4b file>            m4b file to be converted
+    
     optional arguments:
       -h, --help            show this help message and exit
       -o DIR, --output-dir DIR
                             directory to store encoded files
+      --custom-name [STR]   Customize chapter filenames (see README)
       --ffmpeg-bin EXE      path to ffmpeg binary
-      --encode "STR"        custom encoding string (see README)
+      --encode [STR]        custom encoding string (see README)
       --ext EXT             extension of encoded files
       --skip-splitting      do not split files by chapter
       --skip-encoding       do not encode audio (keep as .mp4)
       --debug               display debug messages and save to log file
 
+#### Chapter filenames
+
+When the chapter number isn't included in the chapter title you may want to include it in the generated chapter filenames.
+To do this you can specify `--custom-name 'STR'` where STR is a valid python [format string](http://docs.python.org/library/stdtypes.html#string-formatting-operations). Check the examples below. The
+default is `--custom-name '%(title)s'`.
+
+#### Encoding
+
 By default the audio will be encoded with lame mp3, keeping the same bit rate and sampling frequency as the source file.
-If you wish to use other settings you can specify your encoding string with `--encode "STR"` where `STR` is a bunch of
+If you wish to use other settings you can specify your encoding string with `--encode 'STR'` where `STR` is a bunch of
 valid ffmpeg encoding parameters. Visit the [ffmpeg docs](http://www.ffmpeg.org/ffmpeg-doc.html) for more info.
 
 
@@ -61,11 +76,15 @@ Convert with default settings and show debug messages:
 
     python m4b.py --debug myfile.m4b
 
+Include chapter number in the generated chapter filenames: (example: "Chapter 10 - Some Title.mp3")
+
+    python m4b.py --custom-name 'Chapter %(num)d - %(title)s' myfile.m4b
+
 If you rather want .mp4 files you can skip encoding to speed up the conversion process:
 
     python m4b.py --skip-encoding myfile.m4b
 
 Custom ffmpeg encoding string:
 
-    python m4b.py --encode "-acodec libmp3lame -ar 22050 -ab 128k" myfile.m4b
+    python m4b.py --encode '-acodec libmp3lame -ar 22050 -ab 128k' myfile.m4b
 
