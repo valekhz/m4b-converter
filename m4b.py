@@ -42,7 +42,7 @@ class M4B:
         if self.no_mp4v2:
             self.__get_ffmpeg_chapters()
             self.time_scale = 22050
-            self.bitrate = 64
+            self.bit_rate = 64
         else:
             self.__load_meta()
             self.log.debug('Chapter type: %s' % self.chapter_type)
@@ -135,7 +135,9 @@ included or you need to enable mp4v2.")
             except AttributeError:
                 self.log.error('"%s" is an invalid variable. Check the README on how to use --custom-name.' % x)
                 sys.exit()
-            chapter_name = unicode(re.sub(re_sub, '', (self.custom_name % values).replace('/', '-')), 'utf-8')
+            chapter_name = re_sub.sub('', (self.custom_name % values).replace('/', '-'))
+            if not isinstance(chapter_name, unicode):
+                chapter_name = unicode(chapter_name, 'utf-8')
 
             # ffmpeg on windows can't handle unicode filenames so we use a temporary non-unicode filename
             # then rename to the correct filename later.
