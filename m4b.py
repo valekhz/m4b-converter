@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import argparse
 import ctypes
 import datetime
@@ -14,7 +15,7 @@ class Chapter:
     def __init__(self, title=None, start=None, end=None, num=None):
         self.title = title
         self.start = round(int(start)/1000.0, 3)
-        self.end = round(int(end)/1000., 3)
+        self.end = round(int(end)/1000.0, 3)
         self.num = num
 
     def duration(self):
@@ -109,7 +110,8 @@ class M4B:
         if self.skip_splitting:
             return None
         
-        re_format = re.compile('%\(([A-Za-z0-9]+)\)')
+        re_format = re.compile(r'%\(([A-Za-z0-9]+)\)')
+        re_sub = re.compile(r'[\\\*\?\"\<\>\|]+')
 
         for chapter in self.chapters:
             values = {}
@@ -119,7 +121,7 @@ class M4B:
             except AttributeError:
                 self.log.error('"%s" is an invalid variable. Check the README on how to use --custom-name.' % x)
                 sys.exit()
-            chapter_name = self.custom_name % values
+            chapter_name = re.sub(re_sub, '', (self.custom_name % values).replace('/', '-'))
             filename = os.path.join(self.output_dir, '%s.%s' % (chapter_name, self.ext))
             split_cmd = [self.ffmpeg_bin, '-y', '-acodec', 'copy', '-t',
                          str(chapter.duration()), '-ss', str(chapter.start),
@@ -176,6 +178,7 @@ class M4B:
         libmp4v2.MP4Close(fileHandle)
 
         self.log.info('Found %d chapter(s).' % len(self.chapters))
+        self.log.debug('Chapter type: %s' % chapter_type)
 
     """
     Parse command line arguments.
@@ -219,10 +222,9 @@ class M4B:
         args = parser.parse_args()
 
         if args.output_dir is None:
-            self.output_dir = os.path.join(os.path.dirname(__file__),
+            args.output_dir = os.path.join(os.path.dirname(__file__),
                 os.path.splitext(os.path.basename(args.filename))[0])
-        else:
-            self.output_dir = args.output_dir
+        self.output_dir = args.output_dir
         self.custom_name = args.custom_name
         self.ffmpeg_bin = args.ffmpeg_bin
         if sys.platform.startswith('win'):
@@ -263,7 +265,11 @@ class M4B:
         self.log = logger
 
         self.log.debug('Conversion script started.')
-        self.log.debug('Specified arguments:')
+        if self.debug:
+            s = ['Options:']
+            for k, v in self.args.__dict__.items():
+                s.append('    %s: %s' % (k, v))
+            self.log.debug('\n'.join(s))
 
 
 if __name__ == '__main__':
