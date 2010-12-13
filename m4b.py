@@ -179,6 +179,11 @@ class M4B:
 
         self.log.info('Found %d chapter(s).' % len(self.chapters))
         self.log.debug('Chapter type: %s' % chapter_type)
+        if self.debug:
+            c_list = []
+            for chapter in self.chapters:
+                c_list.append('    Chapter %d - %s (start=%s, end=%s)' % (chapter.num, chapter.title, chapter.start, chapter.end))
+            self.log.debug('Chapters found:\n%s' % '\n'.join(c_list))
 
     """
     Parse command line arguments.
