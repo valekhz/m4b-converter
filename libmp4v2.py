@@ -52,14 +52,54 @@ class MP4Chapter(ctypes.Structure):
         ('title', ctypes.c_char * 1024)
     ]
 
-# Helpers
-def get_audio_track_id(fileHandle):
-    tracks_count = MP4GetNumberOfTracks(fileHandle, None, 0)
-    for n in range(1, tracks_count+1):
-        tt = MP4GetTrackType(fileHandle, n)
-        if tt == 'soun':
-            return n
-    raise Exception('No audio track found.')
+
+class MP4File:
+    '''
+    Helper class.
+    '''
+    def __init__(self, filename):
+        self.filename = filename
+        self.handle = MP4Read(self.filename, 0)
+
+    def load_meta(self):
+        from m4b import Chapter
+
+        self.audio_track = self.__get_audio_track_id()
+        self.sample_rate = MP4GetTrackTimeScale(self.handle, self.audio_track)
+        self.bit_rate = round(MP4GetTrackBitRate(self.handle, self.audio_track) / 1000.0, 0)
+
+        if not self.sample_rate:
+            self.sample_rate = 44100
+        if not self.bit_rate:
+            self.bit_rate = 64
+
+        # Chapters
+        chapter_list = ctypes.POINTER(MP4Chapter)()
+        chapter_count = ctypes.c_uint32(0)
+        self.chapter_type = MP4GetChapters(self.handle, ctypes.byref(chapter_list),
+            ctypes.byref(chapter_count), MP4ChapterType.Any)
+
+        start = 0
+        chapters = []
+        for n in range(0, chapter_count.value):
+            c = Chapter(title=chapter_list[n].title,
+                        start=start,
+                        end=start+int(chapter_list[n].duration),
+                        num=n+1)
+            chapters.append(c)
+            start += chapter_list[n].duration
+        self.chapters = chapters
+
+    def close(self):
+        MP4Close(self.handle)
+
+    def __get_audio_track_id(self):
+        tracks_count = MP4GetNumberOfTracks(self.handle, None, 0)
+        for n in range(1, tracks_count+1):
+            tt = MP4GetTrackType(self.handle, n)
+            if tt == 'soun':
+                return n
+        raise Exception('No audio track found.')
 
 
 if hasattr(dll, 'MP4Close'):
@@ -102,4 +142,3 @@ if hasattr(dll, 'MP4GetTrackBitRate'):
     p = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32)
     f = ((1,), (1,))
     MP4GetTrackBitRate = p(('MP4GetTrackBitRate', dll), f)
-

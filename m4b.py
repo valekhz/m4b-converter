@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 import argparse
 import ctypes
 import datetime
@@ -8,9 +9,14 @@ import re
 import shutil
 import subprocess
 import sys
+from textwrap import dedent
 
 
 class Chapter:
+    """MP4 Chapter.
+
+    Start, end, and duration times are stored in seconds.
+    """
     def __init__(self, title=None, start=None, end=None, num=None):
         self.title = title
         self.start = round(int(start)/1000.0, 3)
@@ -30,307 +36,277 @@ class Chapter:
             datetime.timedelta(seconds=self.end),
             datetime.timedelta(seconds=self.duration()))
 
-class M4B:
-    """
-    Parse, encode, and split M4B file.
+
+def parse_args():
+    """Parse command line arguments."""
+
+    parser = argparse.ArgumentParser(
+        description='Split m4b audio book by chapters.')
+
+    parser.add_argument('-o', '--output-dir', help='directory to store encoded files',
+                        metavar='DIR')
+    parser.add_argument('--custom-name', default='%(title)s', metavar='STR',
+                        help='customize chapter filenames (see README)')
+    parser.add_argument('--ffmpeg', default='ffmpeg', metavar='BIN',
+                        help='path to ffmpeg binary')
+    parser.add_argument('--encode', metavar='STR',
+                        help='custom encoding string (see README)')
+    parser.add_argument('--ext', default='mp3', help='extension of encoded files')
+    parser.add_argument('--skip-encoding', action='store_true',
+                        help='do not encode audio (keep as .mp4)')
+    parser.add_argument('--no-mp4v2', action='store_true',
+                        help='use ffmpeg to retrieve chapters (not recommended)')
+    parser.add_argument('--debug', action='store_true',
+                        help='output debug messages and save to m4b.log')
+    parser.add_argument('filename', help='m4b file to be converted')
+
+    args = parser.parse_args()
+
+    if args.output_dir is None:
+        args.output_dir = os.path.join(os.path.dirname(__file__),
+            os.path.splitext(os.path.basename(args.filename)))[0]
+
+    if sys.platform.startswith('win'):
+        bin = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
+        if os.path.isfile(bin):
+            args.ffmpeg = bin
+
+    if args.skip_encoding:
+        args.temp_dir = args.output_dir
+    else:
+        args.temp_dir = os.path.join(args.output_dir, 'temp')
+
+    return args
+
+def setup_logging(args):
+    """Setup logger. In debug mode debug messages will be saved to m4b.log."""
+
+    log = logging.getLogger('m4b')
+
+    sh = logging.StreamHandler()
+    formatter = logging.Formatter("%(levelname)s: %(message)s")
+
+    sh.setFormatter(formatter)
+
+    if args.debug:
+        level = logging.DEBUG
+        fh = logging.FileHandler(os.path.join(os.path.dirname(__file__), 'm4b.log'), 'w')
+        fh.setLevel(level)
+        log.addHandler(fh)
+    else:
+        level = logging.INFO
+
+    log.setLevel(level)
+    sh.setLevel(level)
+    log.addHandler(sh)
+
+    log.info('m4bsplit started.')
+    if args.debug:
+        s = ['Options:']
+        for k, v in args.__dict__.items():
+            s.append('    %s: %s' % (k, v))
+        log.debug('\n'.join(s))
+    return log
+
+def ffmpeg_metadata(args):
+    """Load metadata using the command output from ffmpeg.
+
+    Note: Not all chapter types are supported by ffmpeg and there's no Unicode support.
     """
 
-    def __init__(self):
-        self.__parse_args()
-        self.__setup_logging()
+    chapters = []
 
-        if self.no_mp4v2:
-            self.__get_ffmpeg_chapters()
-            self.time_scale = 22050
-            self.bit_rate = 64
+    cmd = [args.ffmpeg_bin, '-i', args.filename]
+    args.log.debug('Retrieving metadata from output of command: %s' % ' '.join(cmd))
+
+    # Capture the output.
+    try:
+        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as error:
+        output = error.output.replace('\r\n', '\n')
+
+    raw_metadata = (output.split("    Chapter ")[0]).split('Input #')[1]
+    raw_chapters = output.split("    Chapter ")[1:]
+
+    # Parse stream and metadata
+    re_stream = re.compile(r'[\s]+Stream .*: Audio: .*, ([\d]+) Hz, .*, .*, ([\d]+) kb\/s')
+    re_duration = re.compile(r'[\s]+Duration: (.*), start: (.*), bitrate: ([\d]+) kb\/s')
+
+    try:
+        stream = re_stream.search(output)
+        sample_rate, bit_rate = int(stream.group(1)), int(stream.group(2))
+    except Exception:
+        sample_rate, bit_rate = 44100, 64
+
+    metadata = {}
+    for meta in raw_metadata.split('\n')[2:]:
+        if meta.startswith('  Duration: '):
+            m = re_duration.match(meta)
+            if m:
+                metadata['duration'] = m.group(1).strip()
+                metadata['start'] = m.group(2).strip()
         else:
-            self.__load_meta()
-            self.log.debug('Chapter type: %s' % self.chapter_type)
+            key = (meta.split(':')[0]).strip()
+            value = (':'.join(meta.split(':')[1:])).strip()
+            metadata[key] = value
 
-        self.log.info('Found %d chapter(s).' % len(self.chapters))
-        if len(self.chapters) == 0 and self.no_mp4v2:
-            self.log.warning("No chapters were found. Either there are no chapters \
-included or you need to enable mp4v2.")
-        if self.debug:
-            c_list = []
-            for chapter in self.chapters:
-                c_list.append('    Chapter %d - %s (start=%s, end=%s)' % (
-                    chapter.num, chapter.title, chapter.start, chapter.end))
-            self.log.debug('Chapters found:\n%s' % '\n'.join(c_list))
+    # Parse chapters
+    re_chapter = re.compile('^#[\d\.]+: start ([\d|\.]+), end ([\d|\.]+)[\s]+Metadata:[\s]+title[\s]+: (.*)')
+    n = 1
+    for raw_chapter in raw_chapters:
+        m = re.match(re_chapter, raw_chapter.strip())
+        start = float(m.group(1)) * 1000
+        e = float(m.group(2)) * 1000
+        duration = e - start
+        title = unicode(m.group(3), errors='ignore').strip()
+        chapter = Chapter(num=n, title=title, start=start, end=e)
+        chapters.append(chapter)
+        n += 1
 
-    """
-    Encode and split files.
-    """
-    def convert(self):
-        self.encode()
-        self.split()
-        self.log.info('Conversion finished successfully!')
+    return chapters, sample_rate, bit_rate, metadata
 
-    """
-    Encode m4b file with specified codec.
-    """
-    def encode(self):
-        # Create output directory
-        if not self.chapters:
-            self.log.error('No chapter information was found.')
-            sys.exit()
+def mp4v2_metadata(args):
+    """Load metadata with libmp4v2. Supports both chapter types and Unicode."""
 
-        if self.skip_encoding:
-            self.temp_dir = self.output_dir
-        else:
-            self.temp_dir = os.path.join(self.output_dir, 'temp')
-        if not os.path.isdir(self.temp_dir):
-            os.makedirs(self.temp_dir)
+    from libmp4v2 import MP4File
 
-        if self.skip_encoding:
-            self.encoded_file = self.filename
-            self.ext = 'mp4'
-            return None
-        else:
-            self.encoded_file = os.path.join(self.temp_dir, '%s.%s' % (os.path.splitext(os.path.basename(self.filename))[0], self.ext))
+    mp4 = MP4File(args.filename)
+    mp4.load_meta()
 
-        # Skip encoding?
-        if os.path.isfile(self.encoded_file):
-            msg = "Found a previously encoded file '%s'. Do you want to re-encode it? (y/N/q)" % self.encoded_file
-            self.log.info(msg)
-            i = raw_input('> ')
-            if i.lower() == 'q':
-                self.log.debug('Quitting script.')
-                sys.exit()
-            elif i.lower() != 'y':
-                return None
+    chapters = mp4.chapters
+    sample_rate = mp4.sample_rate
+    bit_rate = mp4.bit_rate
+    metadata = {}
 
-        # Build encoding options unless already specified
-        if self._encode is None:
-            self._encode = '-acodec libmp3lame -ar %s -ab %sk' % (self.time_scale, self.bit_rate)
+    mp4.close()
 
-        encode_cmd = [self.ffmpeg_bin, '-y', '-i', self.filename]
-        encode_cmd += self._encode.split(' ')
-        encode_cmd.append(self.encoded_file)
-        self.log.info('Encoding audio book...')
-        self.log.debug('Encoding with command: %s' % ' '.join(encode_cmd))
-        try:
-            subprocess.check_output(encode_cmd, stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as error:
-            self.log.error('''An error occurred while encoding m4b file.
-  Command: %s
-  Return code: %s
-  Output: --->
-%s
-''' % (' '.join(encode_cmd), error.returncode, error.output))
-            sys.exit()
+    return chapters, sample_rate, bit_rate, metadata
 
-    """
-    Split encoded file by chapter.
-    """
-    def split(self):
-        re_format = re.compile(r'%\(([A-Za-z0-9]+)\)')
-        re_sub = re.compile(r'[\\\*\?\"\<\>\|]+')
+def load_metadata(args):
+    args.log.info('Loading metadata...')
+    if args.no_mp4v2:
+        return ffmpeg_metadata(args)
+    else:
+        return mp4v2_metadata(args)
 
-        for chapter in self.chapters:
-            values = {}
-            try:
-                for x in re_format.findall(self.custom_name):
-                    values[x] = getattr(chapter, x)
-            except AttributeError:
-                self.log.error('"%s" is an invalid variable. Check the README on how to use --custom-name.' % x)
-                sys.exit()
-            chapter_name = re_sub.sub('', (self.custom_name % values).replace('/', '-'))
-            if not isinstance(chapter_name, unicode):
-                chapter_name = unicode(chapter_name, 'utf-8')
+def show_metadata_info(args, chapters, sample_rate, bit_rate, metadata):
+    """Show a summary of the parsed metadata."""
 
-            # ffmpeg on windows can't handle unicode filenames so we use a temporary non-unicode filename
-            # then rename to the correct filename later.
-            if sys.platform.startswith('win'):
-                filename = os.path.join(self.output_dir, '_tmp_%d.%s' % (chapter.num, self.ext))
-            else:
-                filename = os.path.join(self.output_dir, '%s.%s' % (chapter_name, self.ext))
+    args.log.info(dedent('''
+        Metadata:
+          Chapters: %d
+          Bit rate: %d kbit/s
+          Sampling freq: %d Hz''' % (len(chapters), bit_rate, sample_rate)))
 
-            split_cmd = [self.ffmpeg_bin, '-y', '-acodec', 'copy', '-t',
-                         str(chapter.duration()), '-ss', str(chapter.start),
-                         '-i', self.encoded_file, filename]
-            self.log.info("Splitting chapter %2d/%2d '%s'..." % (chapter.num, len(self.chapters), chapter_name))
-            self.log.debug('Splitting with command: %s' % ' '.join(split_cmd))
-            try:
-                subprocess.check_output(split_cmd, stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError as error:
-                self.log.error('''An error occurred while splitting file.
-  Command: %s
-  Return code: %s
-  Output: --->
-%s
-''' % (' '.join(split_cmd), error.returncode, error.output))
-                sys.exit()
+    if args.debug and chapters:
+        args.log.debug(dedent('''
+            Chapter data:
+              %s''' % '\n'.join(['  %s' % c for c in chapters])))
 
-            # Rename file
-            if sys.platform.startswith('win'):
-                new_filename = os.path.join(self.output_dir, '%s.%s' % (chapter_name, self.ext))
-                self.log.debug('Renaming "%s" to "%s".\n' % (filename, new_filename))
-                shutil.move(filename, new_filename)
+    if args.no_mp4v2 and not chapters:
+        args.log.warning("No chapters were found. There may be chapters present but ffmpeg can't read them. Try to enable mp4v2.")
+        args.log.info('Do you want to continue? (y/N)')
+        cont = raw_input('> ')
+        if not cont.lower().startswith('y'):
+            sys.exit(1)
 
-    """
-    Load chapters, bitrate, and more using libmp4v2.
-    """
-    def __load_meta(self):
-        import libmp4v2
+def encode(args, sample_rate, bit_rate, metadata):
+    """Encode audio."""
 
-        self.log.info('Loading meta data...')
+    # Create output and temp directory
+    if not os.path.isdir(args.output_dir):
+        os.makedirs(args.output_dir)
+    if not os.path.isdir(args.temp_dir):
+        os.makedirs(args.temp_dir)
 
-        fileHandle = libmp4v2.MP4Read(self.filename, 0)
+    if args.skip_encoding:
+        encoded_file = args.filename
+        args.ext = 'mp4'
+        return encode_file
+    else:
+        filename = '%s.%s' % (os.path.splitext(os.path.basename(args.filename))[0], args.ext)
+        encoded_file = os.path.join(args.temp_dir, filename)
 
-        trackid = libmp4v2.get_audio_track_id(fileHandle)
-        self.time_scale = libmp4v2.MP4GetTrackTimeScale(fileHandle, trackid)
-        self.bit_rate = round(libmp4v2.MP4GetTrackBitRate(fileHandle, trackid) / 1000.0, 0)
+    if os.path.isfile(encoded_file):
+        args.log.info("Found a previously encoded file '%s'. Do you want to re-encode it? (y/N/q)" % encoded_file)
+        i = raw_input('> ')
+        if i.lower().startswith('q'):
+            sys.exit(0)
+        elif not i.lower() == 'y':
+            return encoded_file
 
-        if not self.time_scale > 0:
-            self.time_scale = 44100
-        if not self.bit_rate > 0:
-            self.bit_rate = 64
+    # Build encoding options
+    if args.encode is None:
+        args.encode = '-acodec libmp3lame -ar %s -ab %sk' % (sample_rate, bit_rate)
 
-        self.log.debug('Time Scale: %s Hz, Bit Rate: %s kbit/s' % (self.time_scale, self.bit_rate))
+    encode_cmd = [args.ffmpeg, '-y', '-i', args.filename]
+    encode_cmd += args.encode.split(' ')
+    encode_cmd.append(encoded_file)
+    args.log.info('Encoding audio...')
+    args.log.debug('Encoding with command: %s' % ' '.join(encode_cmd))
 
-        # Chapters
-        chapter_list = ctypes.POINTER(libmp4v2.MP4Chapter)()
-        chapter_count = ctypes.c_uint32(0)
-        self.chapter_type = libmp4v2.MP4GetChapters(fileHandle, ctypes.byref(chapter_list),
-            ctypes.byref(chapter_count), libmp4v2.MP4ChapterType.Any)
+    try:
+        subprocess.check_output(encode_cmd, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as error:
+        args.log.error('''An error occurred while encoding m4b file.
+          Command: %s
+          Return code: %s
+          Output: --->
+          %s
+        ''' % (' '.join(encode_cmd), error.returncode, error.output))
+        sys.exit(1)
+    return encoded_file
 
-        start = 0
-        self.chapters = []
-        for n in range(0, chapter_count.value):
-            c = Chapter(title=chapter_list[n].title,
-                        start=start,
-                        end=start+int(chapter_list[n].duration),
-                        num=n+1)
-            self.chapters.append(c)
-            start += chapter_list[n].duration
+def split(args, encoded_file, chapters):
+    re_format = re.compile(r'%\(([A-Za-z0-9]+)\)')
+    re_sub = re.compile(r'[\\\*\?\"\<\>\|]+')
 
-        libmp4v2.MP4Close(fileHandle)
+    for chapter in chapters:
+        values = dict(num=chapter.num, title=chapter.title, start=chapter.start, end=chapter.end, duration=chapter.duration())
+        chapter_name = re_sub.sub('', (args.custom_name % values).replace('/', '-'))
+        if not isinstance(chapter_name, unicode):
+            chapter_name = unicode(chapter_name, 'utf-8')
 
-    '''
-    Retrieve chapters from ffmpeg output instead of using mp4v2. Not recommended.
-    '''
-    def __get_ffmpeg_chapters(self):
-        cmd = [self.ffmpeg_bin, '-i', self.filename]
-        self.log.debug('Retrieving chapter data from output of command: %s' % ' '.join(cmd))
-        output = ''
-        # Command will fail but that's fine.
-        try:
-            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as error:
-            output = error.output
-
-        raw = output.split("    Chapter ")[1:]
-        re_chapter = re.compile('^#[\d\.]+: start ([\d|\.]+), end ([\d|\.]+)[\s]+Metadata:[\s]+title[\s]+: (.*)')
-
-        chapters = []
-        n = 1
-        for raw_chapter in raw:
-            m = re.match(re_chapter, raw_chapter.strip())
-            start = float(m.group(1)) * 1000
-            e = float(m.group(2)) * 1000
-            duration = e - start
-            title = unicode(m.group(3), errors='ignore').strip()
-            chapter = Chapter(num=n, title=title, start=start, end=e)
-            chapters.append(chapter)
-            n += 1
-
-        self.chapters = chapters
-        self.log.debug('Found %d chapter(s).' % len(self.chapters))
-
-    """
-    Parse command line arguments.
-    """
-    def __parse_args(self):
-        parser = argparse.ArgumentParser(
-            description='Convert m4b audio book to mp3 file(s).')
-
-        parser.add_argument('-o', '--output-dir',
-            help='directory to store encoded files',
-            metavar='DIR')
-        parser.add_argument('--custom-name',
-            default='%(title)s',
-            help='customize chapter filenames (see README)',
-            metavar='STR',
-            nargs='?')
-        parser.add_argument('--ffmpeg-bin',
-            default='ffmpeg',
-            help='path to ffmpeg binary',
-            metavar='EXE')
-        parser.add_argument('--encode', nargs='?',
-            dest='_encode',
-            help='custom encoding string (see README)',
-            metavar='STR')
-        parser.add_argument('--ext',
-            default='mp3',
-            help='extension of encoded files')
-        parser.add_argument('--skip-encoding',
-            action='store_true',
-            help='do not encode audio (keep as .mp4)')
-        parser.add_argument('--no-mp4v2',
-            action='store_true',
-            help="use ffmpeg to retrieve chapters (not recommended)")
-        parser.add_argument('--debug',
-            action='store_true',
-            help='output debug messages and save to m4b.log')
-        parser.add_argument('filename',
-            help='m4b file to be converted',
-            metavar='<m4b file>')
-
-        args = parser.parse_args()
-
-        if args.output_dir is None:
-            args.output_dir = os.path.join(os.path.dirname(__file__),
-                os.path.splitext(os.path.basename(args.filename))[0])
-        self.output_dir = args.output_dir
-        self.custom_name = args.custom_name
-        self.ffmpeg_bin = args.ffmpeg_bin
+        # ffmpeg on windows can't handle unicode filenames so we use a temporary non-unicode filename
+        # then rename to the correct filename later.
         if sys.platform.startswith('win'):
-            curr = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
-            if os.path.isfile(curr):
-                self.ffmpeg_bin = curr
-        self._encode = args._encode
-        self.ext = args.ext
-        self.skip_encoding = args.skip_encoding
-        self.no_mp4v2 = args.no_mp4v2
-        self.debug = args.debug
-        self.filename = args.filename
-        self.args = args
-
-    def __setup_logging(self):
-        logger = logging.getLogger('m4b')
-
-        if self.debug:
-            level = logging.DEBUG
-            ch = logging.StreamHandler()
-            fh = logging.FileHandler(os.path.join(os.path.dirname(__file__),
-                                     'm4b.log'), 'w')
+            filename = os.path.join(args.output_dir, '_tmp_%d.%s' % (chapter.num, args.ext))
         else:
-            level = logging.INFO
-            ch = logging.StreamHandler()
+            filename = os.path.join(args.output_dir, '%s.%s' % (chapter_name, args.ext))
 
-        formatter = logging.Formatter("%(levelname)s: %(message)s")
-        ch.setFormatter(formatter)
+        split_cmd = [args.ffmpeg, '-y', '-acodec', 'copy', '-t',
+                     str(chapter.duration()), '-ss', str(chapter.start),
+                     '-i', encoded_file, filename]
+        args.log.info("Splitting chapter %2d/%2d '%s'..." % (chapter.num, len(chapters), chapter_name))
+        args.log.debug('Splitting with command: %s' % ' '.join(split_cmd))
+        try:
+            subprocess.check_output(split_cmd, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as error:
+            msg = dedent('''
+                An error occurred while splitting file.
+                  Command: %s
+                  Return code: %s
+                  Output: ---->
+                %s''')
+            args.log.error(msg % (' '.join(split_cmd), error.returncode, error.output))
+            sys.exit(1)
 
-        logger.setLevel(level)
-        ch.setLevel(level)
+        # Rename file
+        if sys.platform.startswith('win'):
+            new_filename = os.path.join(args.output_dir, '%s.%s' % (chapter_name, args.ext))
+            args.log.debug('Renaming "%s" to "%s".\n' % (filename, new_filename))
+            shutil.move(filename, new_filename)
 
-        logger.addHandler(ch)
-        if self.debug:
-            fh.setLevel(level)
-            logger.addHandler(fh)
+def main():
+    args = parse_args()
+    args.log = setup_logging(args)
 
-        self.log = logger
+    chapters, sample_rate, bit_rate, metadata = load_metadata(args)
+    show_metadata_info(args, chapters, sample_rate, bit_rate, metadata)
 
-        self.log.debug('Script started.')
-        if self.debug:
-            s = ['Options:']
-            for k, v in self.args.__dict__.items():
-                s.append('    %s: %s' % (k, v))
-            self.log.debug('\n'.join(s))
+    encoded_file = encode(args, sample_rate, bit_rate, metadata)
 
+    split(args, encoded_file, chapters)
 
 if __name__ == '__main__':
-    book = M4B()
-    book.convert()
-
+    main()
