@@ -56,11 +56,11 @@ There are two ways to use this script:
       --pipe-wav            pipe wav to encoder
       --skip-encoding       do not encode audio (keep as .mp4)
       --no-mp4v2            use ffmpeg to retrieve chapters (not recommended)
-      --debug               output debug messages and save to m4b.log
+      --debug               output debug messages and save to log file
 
 #### Chapter filenames
 
-You can customize the chapter filenames with `--custom-name "STR"` where STR is a valid python [format string](http://docs.python.org/library/stdtypes.html#string-formatting-operations).
+You can customize the chapter filenames with `--custom-name "STR"` where `STR` is a valid python [format string](http://docs.python.org/library/stdtypes.html#string-formatting-operations).
 
 Default ("My Title.mp3"):
 
@@ -86,6 +86,10 @@ If you wish to use other settings you can specify your own encoding options with
 
 
 ### Examples
+
+Convert multiple audio books (you can also drag multiple m4b files onto `m4b.py`):
+
+    python m4b.py myfile.m4b otherfile.m4b
 
 Include chapter number in the generated filenames: (example: "Chapter 10 - Some Title.mp3")
 

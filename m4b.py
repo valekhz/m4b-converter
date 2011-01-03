@@ -77,7 +77,7 @@ def parse_args():
     parser.add_argument('--no-mp4v2', action='store_true',
                         help='use ffmpeg to retrieve chapters (not recommended)')
     parser.add_argument('--debug', action='store_true',
-                        help='output debug messages and save to m4b.log')
+                        help='output debug messages and save to log file')
     parser.add_argument('filename', help='m4b file(s) to be converted', nargs='+')
 
     args = parser.parse_args()
