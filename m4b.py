@@ -37,6 +37,23 @@ class Chapter:
             datetime.timedelta(seconds=self.duration()))
 
 
+def run_command(args, cmdstr, values, action, ignore_errors=False, **kwargs):
+    cmd = []
+    for opt in cmdstr.split(' '):
+        cmd.append(opt % values)
+    proc = subprocess.Popen(cmd, **kwargs)
+    (stdout, output) = proc.communicate()
+    if not ignore_errors and not proc.returncode == 0:
+        msg = dedent('''
+            An error occurred while %s.
+              Command: %s
+              Return code: %s
+              Output: ---->
+            %s''')
+        args.log.error(msg % (action, cmdstr % values, proc.returncode, output))
+        sys.exit(1)
+    return output
+
 def parse_args():
     """Parse command line arguments."""
 
@@ -45,13 +62,17 @@ def parse_args():
 
     parser.add_argument('-o', '--output-dir', help='directory to store encoded files',
                         metavar='DIR')
-    parser.add_argument('--custom-name', default='%(title)s', metavar='STR',
+    parser.add_argument('--custom-name', default='%(title)s', metavar='"STR"',
                         help='customize chapter filenames (see README)')
     parser.add_argument('--ffmpeg', default='ffmpeg', metavar='BIN',
                         help='path to ffmpeg binary')
-    parser.add_argument('--encode', metavar='STR',
-                        help='custom encoding string (see README)')
+    parser.add_argument('--encoder', metavar='BIN',
+                        help='path to encoder binary (default: ffmpeg)')
+    parser.add_argument('--encode-opts', default='-y -i %(infile)s -acodec libmp3lame -ar %(sample_rate)s -ab %(bit_rate)sk %(outfile)s',
+                        metavar='"STR"', help='custom encoding string (see README)')
     parser.add_argument('--ext', default='mp3', help='extension of encoded files')
+    parser.add_argument('--generate-wav', action='store_true',
+                        help='generate .wav file that other encoders can use')
     parser.add_argument('--skip-encoding', action='store_true',
                         help='do not encode audio (keep as .mp4)')
     parser.add_argument('--no-mp4v2', action='store_true',
@@ -66,10 +87,8 @@ def parse_args():
         args.output_dir = os.path.join(os.path.dirname(__file__),
             os.path.splitext(os.path.basename(args.filename)))[0]
 
-    if sys.platform.startswith('win'):
-        bin = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
-        if os.path.isfile(bin):
-            args.ffmpeg = bin
+    if args.encoder is None:
+        args.encoder = args.ffmpeg
 
     if args.skip_encoding:
         args.temp_dir = args.output_dir
@@ -116,14 +135,12 @@ def ffmpeg_metadata(args):
 
     chapters = []
 
-    cmd = [args.ffmpeg_bin, '-i', args.filename]
-    args.log.debug('Retrieving metadata from output of command: %s' % ' '.join(cmd))
+    values = dict(ffmpeg=args.ffmpeg, infile=args.filename)
+    cmd = '%(ffmpeg)s -i %(infile)s'
+    args.log.debug('Retrieving metadata from output of command: %s' % (cmd % values))
 
-    # Capture the output.
-    try:
-        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as error:
-        output = error.output.replace('\r\n', '\n')
+    output = run_command(args, cmd, values, 'retrieving metadata from ffmpeg output',
+        ignore_errors=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     raw_metadata = (output.split("    Chapter ")[0]).split('Input #')[1]
     raw_chapters = output.split("    Chapter ")[1:]
@@ -236,28 +253,29 @@ def encode(args, sample_rate, bit_rate, metadata):
             return encoded_file
 
     # Build encoding options
-    if args.encode is None:
-        args.encode = '-acodec libmp3lame -ar %s -ab %sk' % (sample_rate, bit_rate)
+    values = dict(encoder=args.encoder, infile=args.filename,
+        sample_rate=sample_rate, bit_rate=bit_rate, outfile=encoded_file)
 
-    encode_cmd = [args.ffmpeg, '-y', '-i', args.filename]
-    encode_cmd += args.encode.split(' ')
-    encode_cmd.append(encoded_file)
-    args.log.info('Encoding audio...')
-    args.log.debug('Encoding with command: %s' % ' '.join(encode_cmd))
-
-    try:
-        subprocess.check_output(encode_cmd, stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as error:
-        args.log.error('''An error occurred while encoding m4b file.
-          Command: %s
-          Return code: %s
-          Output: --->
-          %s
-        ''' % (' '.join(encode_cmd), error.returncode, error.output))
+    if not '%(infile)s' in args.encode_opts or not '%(outfile)s' in args.encode_opts:
+        args.log.error('%(outfile)s needs to be present in the encoding options. See the README.')
         sys.exit(1)
+
+    encode_cmd = '%%(encoder)s %s' % args.encode_opts
+
+    args.log.info('Encoding audio...')
+    args.log.debug('Encoding with command: %s' % (encode_cmd % values))
+
+    run_command(args, encode_cmd, values, 'encoding audio')
+
     return encoded_file
 
 def split(args, encoded_file, chapters):
+    """Split encoded audio file into chapters.
+
+    Note: ffmpeg on Windows can't take filenames with Unicode characters so we
+    write the split file to a non-unicode temp file then rename it. This is not
+    necessary on other platforms.
+    """
     re_format = re.compile(r'%\(([A-Za-z0-9]+)\)')
     re_sub = re.compile(r'[\\\*\?\"\<\>\|]+')
 
@@ -267,29 +285,19 @@ def split(args, encoded_file, chapters):
         if not isinstance(chapter_name, unicode):
             chapter_name = unicode(chapter_name, 'utf-8')
 
-        # ffmpeg on windows can't handle unicode filenames so we use a temporary non-unicode filename
-        # then rename to the correct filename later.
         if sys.platform.startswith('win'):
             filename = os.path.join(args.output_dir, '_tmp_%d.%s' % (chapter.num, args.ext))
         else:
             filename = os.path.join(args.output_dir, '%s.%s' % (chapter_name, args.ext))
 
-        split_cmd = [args.ffmpeg, '-y', '-acodec', 'copy', '-t',
-                     str(chapter.duration()), '-ss', str(chapter.start),
-                     '-i', encoded_file, filename]
+        values = dict(ffmpeg=args.ffmpeg, duration=str(chapter.duration()),
+            start=str(chapter.start), outfile=encoded_file, infile=filename)
+        split_cmd = '%(ffmpeg)s -y -acodec copy -t %(duration)s -ss %(start)s -i %(outfile)s %(infile)s'
+
         args.log.info("Splitting chapter %2d/%2d '%s'..." % (chapter.num, len(chapters), chapter_name))
-        args.log.debug('Splitting with command: %s' % ' '.join(split_cmd))
-        try:
-            subprocess.check_output(split_cmd, stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as error:
-            msg = dedent('''
-                An error occurred while splitting file.
-                  Command: %s
-                  Return code: %s
-                  Output: ---->
-                %s''')
-            args.log.error(msg % (' '.join(split_cmd), error.returncode, error.output))
-            sys.exit(1)
+        args.log.debug('Splitting with command: %s' % (split_cmd % values))
+
+        run_command(args, split_cmd, values, 'splitting audio file', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         # Rename file
         if sys.platform.startswith('win'):
