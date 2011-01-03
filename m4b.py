@@ -82,8 +82,14 @@ def parse_args():
 
     args = parser.parse_args()
 
+    cwd = os.path.dirname(__file__)
+
+    # Required when dropping m4b files onto m4b.py
+    if not cwd == '':
+        os.chdir(cwd)
+
     if args.output_dir is None:
-        args.output_dir = os.path.dirname(__file__)
+        args.output_dir = cwd
 
     if args.encoder is None:
         args.encoder = args.ffmpeg
