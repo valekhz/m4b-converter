@@ -68,11 +68,10 @@ def parse_args():
                         help='path to ffmpeg binary')
     parser.add_argument('--encoder', metavar='BIN',
                         help='path to encoder binary (default: ffmpeg)')
-    parser.add_argument('--encode-opts', default='-y -i %(infile)s -acodec libmp3lame -ar %(sample_rate)s -ab %(bit_rate)sk %(outfile)s',
+    parser.add_argument('--encode-opts', default='-y -i %(infile)s -acodec libmp3lame -ar %(sample_rate)d -ab %(bit_rate)dk %(outfile)s',
                         metavar='"STR"', help='custom encoding string (see README)')
     parser.add_argument('--ext', default='mp3', help='extension of encoded files')
-    parser.add_argument('--generate-wav', action='store_true',
-                        help='generate .wav file that other encoders can use')
+    parser.add_argument('--pipe-wav', action='store_true', help='pipe wav to encoder')
     parser.add_argument('--skip-encoding', action='store_true',
                         help='do not encode audio (keep as .mp4)')
     parser.add_argument('--no-mp4v2', action='store_true',
@@ -236,13 +235,17 @@ def encode(args, sample_rate, bit_rate, metadata):
     if not os.path.isdir(args.temp_dir):
         os.makedirs(args.temp_dir)
 
+    basename = os.path.splitext(os.path.basename(args.filename))[0]
     if args.skip_encoding:
         encoded_file = args.filename
         args.ext = 'mp4'
-        return encode_file
+        return encoded_file
     else:
-        filename = '%s.%s' % (os.path.splitext(os.path.basename(args.filename))[0], args.ext)
+        filename = '%s.%s' % (basename, args.ext)
         encoded_file = os.path.join(args.temp_dir, filename)
+
+    cmd_values = dict(ffmpeg=args.ffmpeg, encoder=args.encoder, infile=args.filename,
+        sample_rate=sample_rate, bit_rate=bit_rate, outfile=encoded_file)
 
     if os.path.isfile(encoded_file):
         args.log.info("Found a previously encoded file '%s'. Do you want to re-encode it? (y/N/q)" % encoded_file)
@@ -253,19 +256,19 @@ def encode(args, sample_rate, bit_rate, metadata):
             return encoded_file
 
     # Build encoding options
-    values = dict(encoder=args.encoder, infile=args.filename,
-        sample_rate=sample_rate, bit_rate=bit_rate, outfile=encoded_file)
-
-    if not '%(infile)s' in args.encode_opts or not '%(outfile)s' in args.encode_opts:
+    if not '%(outfile)s' in args.encode_opts:
         args.log.error('%(outfile)s needs to be present in the encoding options. See the README.')
         sys.exit(1)
 
     encode_cmd = '%%(encoder)s %s' % args.encode_opts
 
-    args.log.info('Encoding audio...')
-    args.log.debug('Encoding with command: %s' % (encode_cmd % values))
+    if args.pipe_wav:
+        encode_cmd = '%(ffmpeg)s -i %(infile)s -f wav pipe:1 | ' + encode_cmd
 
-    run_command(args, encode_cmd, values, 'encoding audio')
+    args.log.info('Encoding audio...')
+    args.log.debug('Encoding with command: %s' % (encode_cmd % cmd_values))
+
+    run_command(args, encode_cmd, cmd_values, 'encoding audio', shell=args.pipe_wav)
 
     return encoded_file
 
