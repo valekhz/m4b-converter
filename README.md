@@ -28,7 +28,7 @@ own dll, then place it in this directory.
 
 There are two ways to use this script:
 
-1. Drag your `.m4b` file onto `m4b.py`.
+1. Drag your `.m4b` file(s) onto `m4b.py`.
 2. Using the command line which also offers more advanced options.
 
 
@@ -37,12 +37,12 @@ There are two ways to use this script:
     usage: m4b.py [-h] [-o DIR] [--custom-name "STR"] [--ffmpeg BIN]
                   [--encoder BIN] [--encode-opts "STR"] [--ext EXT] [--pipe-wav]
                   [--skip-encoding] [--no-mp4v2] [--debug]
-                  filename
+                  filename [filename ...]
 
     Split m4b audio book by chapters.
 
     positional arguments:
-      filename              m4b file to be converted
+      filename              m4b file(s) to be converted
 
     optional arguments:
       -h, --help            show this help message and exit
